@@ -157,9 +157,43 @@ impl<'a> Lexer<'a> {
         c.is_ascii_alphanumeric() || *c == '-' || *c == '.'
     }
 
+    #[inline]
+    fn is_url_char(c: &char) -> bool {
+        // From https://datatracker.ietf.org/doc/html/rfc3986#section-2
+        c.is_ascii_alphanumeric() || [
+            // Unreserved
+            '-',
+            '.',
+            '_',
+            '~',
+            // Percent encoding
+            '%',
+            // Reserved generic delimiters
+            ':',
+            '/',
+            '?',
+            '#',
+            '[',
+            ']',
+            '@',
+            // Reserved sub delimiters
+            '!',
+            '$',
+            '&',
+            '\'',
+            // Removed as they are found in SPDX expressions '(', ')',
+            '*',
+            '+',
+            ',',
+            ';',
+            '=',
+        ].contains(c)
+    }
+
     /// Return a matching text token if found - equivalent to the regex `^[-a-zA-Z0-9.:]+`
     fn find_text_token(text: &'a str) -> Option<&'a str> {
-        let is_token_char = |c: &char| Self::is_ref_char(c) || *c == ':';
+        //TODO: hack to allow for parsing LicenseRef-ID=URL
+        let is_token_char = |c: &char| Self::is_url_char(c);
         match text.chars().take_while(is_token_char).count() {
             index if index > 0 => Some(&text[..index]),
             _ => None,
@@ -167,9 +201,10 @@ impl<'a> Lexer<'a> {
     }
 
     /// Extract the text after `prefix` if made up of valid ref characters
-    fn find_ref(prefix: &str, text: &'a str) -> Option<&'a str> {
+    fn find_ref(prefix: &str, text: &'a str, allow_url: bool) -> Option<&'a str> {
         text.strip_prefix(prefix).map(|value| {
-            let end = value.chars().take_while(Self::is_ref_char).count();
+            //TODO: hack to allow for parsing LicenseRef-ID=URL
+            let end = value.chars().take_while(if allow_url { Self::is_url_char } else { Self::is_ref_char }).count();
             &text[prefix.len()..prefix.len() + end]
         })
     }
@@ -177,14 +212,14 @@ impl<'a> Lexer<'a> {
     /// Return a license ref if found - equivalent to the regex `^LicenseRef-([-a-zA-Z0-9.]+)`
     #[inline]
     fn find_license_ref(text: &'a str) -> Option<&'a str> {
-        Self::find_ref("LicenseRef-", text)
+        Self::find_ref("LicenseRef-", text, true)
     }
 
     /// Return a document ref and license ref if found,
     /// equivalent to the regex `^DocumentRef-([-a-zA-Z0-9.]+):LicenseRef-([-a-zA-Z0-9.]+)`
     fn find_document_and_license_ref(text: &'a str) -> Option<(&'a str, &'a str)> {
         let split = text.split_once(':');
-        let doc_ref = split.and_then(|(doc, _)| Self::find_ref("DocumentRef-", doc));
+        let doc_ref = split.and_then(|(doc, _)| Self::find_ref("DocumentRef-", doc, false));
         let lic_ref = split.and_then(|(_, lic)| Self::find_license_ref(lic));
         Option::zip(doc_ref, lic_ref)
     }
